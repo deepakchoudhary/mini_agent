@@ -12,9 +12,7 @@ Selected repository:
 https://github.com/sergenes/mini_agent
 ```
 
-The goal is to treat this prototype AI agent as if it were going live and evaluate what would break, what is fragile, what is missing, and what I would fix first.
-
-This revised plan is tightened around production-agent reliability research: agent systems need repeated evals, trace-level observability, bounded execution, governed tool use, and careful memory design before they can be considered production-ready. The central conclusion is that evaluation was the correct first refactor, but the current harness is only the first layer of a broader production reliability program.
+This  plan is tightened around production-agent reliability research: agent systems need repeated evals, trace-level observability, bounded execution, governed tool use, and careful memory design before they can be considered production-ready. The central conclusion is that evaluation was the correct first refactor, but the current harness is only the first layer of a broader production reliability program.
 
 ## 1. Production Readiness Audit
 
@@ -129,7 +127,7 @@ The current `calculate()` implementation uses Python `eval()`, which is acceptab
 
 ### Refactor Chosen
 
-I implemented a lightweight **evaluation and regression detection framework**.
+Implemented a lightweight **evaluation and regression detection framework**.
 
 ### Why This Refactor
 
@@ -198,7 +196,7 @@ The current implementation is strongest on output and trajectory checks. End-sta
 
 ### Dataset
 
-I created a benchmark suite of 32 tasks.
+A benchmark suite of 32 tasks.
 
 These 32 tasks are early single-trial evidence, not definitive production reliability measurements. Because LLM agent behavior is stochastic, production gates should run repeated attempts per task and track variance or confidence intervals.
 
@@ -369,7 +367,7 @@ python eval/run_eval.py --task-id single_tool_math_001
 
 ### Eval Evidence
 
-I tested two local model variants. These results are useful early evidence from the current single-trial benchmark, but they should not be interpreted as statistically stable production reliability.
+Tested two local model variants. These results are useful early evidence from the current single-trial benchmark, but they should not be interpreted as statistically stable production reliability.
 
 ```text
 Mini Agent Eval Summary
@@ -502,7 +500,7 @@ RTX-adjusted latency sanity check:
 | `gemma4-e2b-64k` | 12.351s | about 3.0s | about 5.8s |
 | `gemma4-12b-32k` | 35.313s | about 5.6s | about 14.5s |
 
-I would not use these adjusted numbers as the primary estimate until the eval suite is rerun on the target RTX hardware. They are a sanity check showing that dedicated RTX should help, while the observed eval numbers remain the safest baseline for this submission.
+These are estimates and shouldn't be quoted as the primary estimate until the eval suite is rerun on the target RTX hardware. They are a sanity check showing that dedicated RTX should help, while the observed eval numbers remain the safest baseline for this discussion.
 
 ### Memory and Batching Effects
 
@@ -531,14 +529,14 @@ creates several smaller model calls separated by Python/tool latency,
 which limits continuous batching efficiency.
 ```
 
-I did not apply a batching discount directly to the main cost table because the actual gain depends on the serving stack. With vLLM/SGLang-style continuous batching, E2B could plausibly improve cost per completed run by 20-50% under load. For 12B on 16GB GPUs, batching benefits may be much smaller or unavailable because memory headroom is already tight.
+Did not mention a batching discount to the main cost table because the actual gain depends on the serving stack. With vLLM/SGLang-style continuous batching, E2B could plausibly improve cost per completed run by 20-50% under load. For 12B on 16GB GPUs, batching benefits may be much smaller or unavailable because memory headroom is already tight.
 
 ### Estimated GPU Serving Cost
 
 To estimate cloud GPU cost, assume the active inference hours above are served on normal single-GPU instances with at least 16GB VRAM. Public hourly reference prices:
 
 - Google Cloud lists NVIDIA T4 16GB at about **USD 0.35/hr**.
-- RunPod lists RTX 4090 24GB Community Cloud from **USD 0.34/hr** and Secure Cloud at **USD 0.69/hr**; I use **USD 0.69/hr** below as the more conservative production-like estimate.
+- RunPod lists RTX 4090 24GB Community Cloud from **USD 0.34/hr** and Secure Cloud at **USD 0.69/hr**; Assumption: **USD 0.69/hr** below as the more conservative production-like estimate.
 - Lambda/A10 pricing references commonly place A10 24GB around **USD 0.86/hr**.
 
 Pricing references:
@@ -595,7 +593,7 @@ E2B is a good fit for g4dn-class 16GB T4 instances.
 or no headroom for KV cache, batching, runtime overhead, or long-context requests.
 ```
 
-For 12B, `g4dn.2xlarge` or `g4dn.4xlarge` improves CPU/system memory but still has the same 16GB GPU memory. That means it may not solve the main VRAM bottleneck. For production 12B serving, I would prefer 24GB+ GPUs or a serving setup that has been tested with the actual context length, quantization, batch size, and concurrency target.
+For 12B, `g4dn.2xlarge` or `g4dn.4xlarge` improves CPU/system memory but still has the same 16GB GPU memory. That means it may not solve the main VRAM bottleneck. For production 12B serving,  24GB+ GPUs would be preffered or a serving setup that has been tested with the actual context length, quantization, batch size, and concurrency target.
 
 Cost conclusion:
 
@@ -605,9 +603,11 @@ capacity than the E2B route based on observed eval latency. It improves advanced
 task success slightly, but it is slower and weaker on multi-step and recovery metrics.
 ```
 
-For this workload, I would default to E2B for direct reasoning, single-tool, simple multi-step, and latency-sensitive paths. I would route to 12B or a remote model only for advanced tasks where category-specific evals prove the quality improvement justifies the extra cost.
+For this workload, default to E2B for direct reasoning, single-tool, simple multi-step, and latency-sensitive paths. Route to 12B or a remote model only for advanced tasks where category-specific evals prove the quality improvement justifies the extra cost.
 
 ### Cost Risk
+
+The experiment for eval metrics was done using ollama on m4 chip to verify close to SOTA that could run on my latop using gemma4 12b 32K context and e2b 64k context. We'll take some benchmarks on gemma4. Making assumptions we'll approximate the cost of running tools use for these on the close to frontier open weight gemma models on certain tasks on Nvidia RTX and AWS g4dn, essentially small instances and balancing with a mix of higher end models on token usage as necessary.
 
 For local Ollama execution, the dominant cost is not per-token API billing; it is serving capacity, GPU rental, hardware amortization, power, queueing, and operational overhead. For remote model execution, the same runaway behavior becomes direct per-token API spend.
 
@@ -845,7 +845,7 @@ Why this is later:
 
 ### Long-Term Memory
 
-I would not add long-term user memory in this assignment.
+Skipped for this assignment.
 
 Reasons:
 
@@ -884,7 +884,7 @@ This should remain future work until Level 1 observability and Level 2 evals are
 
 ## 6. Maturity Roadmap
 
-Each subpoint below uses `subpoint: about` format: a short plain-English definition plus why it matters for production reliability.
+Roadmap with checkpoints and associated outcomes.
 
 ### Level 0: Baseline Agent
 
