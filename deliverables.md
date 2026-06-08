@@ -14,6 +14,8 @@ https://github.com/sergenes/mini_agent
 
 The goal is to treat this prototype AI agent as if it were going live and evaluate what would break, what is fragile, what is missing, and what I would fix first.
 
+This revised plan is tightened around production-agent reliability research: agent systems need repeated evals, trace-level observability, bounded execution, governed tool use, and careful memory design before they can be considered production-ready. The central conclusion is that evaluation was the correct first refactor, but the current harness is only the first layer of a broader production reliability program.
+
 ## 1. Production Readiness Audit
 
 ### Understanding the Repository
@@ -79,13 +81,17 @@ Therefore, the audit and eval framework focus on:
 
 | Area | Risk | Finding |
 | --- | --- | --- |
-| Evaluation and regression detection | Critical | Before this work, the repo had no benchmark suite, metrics, or regression gate. |
-| Reliability | High | Reliability primitives exist, but reliability behavior was not measured automatically. |
-| Observability | High | Tool traces exist, but full production run tracing, durable history, request IDs, and aggregate metrics are incomplete. |
-| Cost controls | High | There is no token accounting, cost estimate, max loop count, or per-run budget. |
+| Evaluation and regression detection | Critical | Before this work, the repo had no benchmark suite or metrics. The new harness is a useful first layer, but production-grade regression detection still needs repeated trials, held-out tasks, and statistical gates. |
+| Stochastic reliability | Critical | A single run per task cannot establish stable reliability for an LLM agent. The same task must be tested across repeated attempts and prompt perturbations. |
+| Reliability | High | Reliability primitives exist, but reliability behavior is not yet measured under production-like stress such as timeouts, partial tool responses, rate limits, schema drift, and stale observations. |
+| Observability | High | Tool traces exist, but full production run tracing, durable history, request IDs, trace spans, policy decisions, budget counters, and aggregate metrics are incomplete. |
+| Evaluation depth | High | Current grading checks answer text and tool paths, but stronger evals should also verify final state and detect silent failures where the answer looks right but the trajectory or side effect is wrong. |
+| Cost controls | High | There is no token accounting, cost estimate, max loop count, max tool-call count, max context budget, or per-run budget. |
 | Latency and scalability | High | Latency varies significantly by model; MCP subprocess startup per call may become a bottleneck. |
-| Memory and state | Medium | The agent has in-run message memory but no durable run memory, replay, or session memory. |
-| Security and tool safety | High | Schema validation exists, but `calculate()` uses Python `eval()` and tool execution needs stricter sandboxing before production. |
+| Memory and state | Medium | The agent has in-run message memory but no governed write-manage-read memory architecture for durable traces, replay, session memory, retention, deletion, or contradiction handling. |
+| Security and tool safety | High | Schema validation exists, but `calculate()` uses Python `eval()` and tool execution needs a first-class policy layer before production. |
+
+The existing retries, circuit breaker, schema validation, structured tool tracing, and provider fallback are valuable primitives. They are not enough by themselves: production agent reliability depends on whether those primitives behave correctly across repeated, adversarial, and production-like runs.
 
 ### What Breaks or Is Fragile
 
@@ -97,6 +103,27 @@ Therefore, the audit and eval framework focus on:
 - Larger local models may be slower and not necessarily more reliable.
 - MCP subprocess creation per tool call may not scale cleanly.
 - Missing persistent run history makes debugging and replay difficult.
+- Single-trial evals can overstate reliability because LLM behavior is stochastic.
+- Text-only grading can miss silent failures where the final answer looks plausible but the wrong tool path or side effect occurred.
+- Missing hard execution limits can turn retries, tool loops, or mixed-mode delegation into runaway cost.
+- Missing tool policy means syntactically valid tool calls can still be unsafe, unauthorized, or too expensive.
+- Ungoverned memory can preserve stale, private, poisoned, or contradictory information.
+
+### Tool Policy Direction
+
+Before production, tool execution should sit behind a first-class `ToolPolicy` layer. Schema validation should remain, but it should be paired with authorization and semantic checks:
+
+- allow or deny tools by user, mode, and task,
+- classify side effects before execution,
+- require confirmation for writes or other state-changing actions,
+- enforce network/domain allowlists for future network-capable tools,
+- validate tool inputs semantically, not only structurally,
+- apply per-tool rate limits, timeouts, and output caps,
+- redact secrets in tool arguments and results,
+- log policy decisions for debugging and audit,
+- test prompt-injection attempts embedded in tool outputs.
+
+The current `calculate()` implementation uses Python `eval()`, which is acceptable only as a demo shortcut. A production version should replace it with a safe math parser or restricted expression evaluator.
 
 ## 2. Refactor of the Single Most Critical Failure Point
 
@@ -150,18 +177,30 @@ Implemented benchmark-driven evals:
 Current maturity:
 
 ```text
-Level 2: Evaluation & Regression Detection
+Initial Level 2 Harness Implemented
 ```
 
-Level 1 observability is partially implemented as supporting infrastructure through tool-call capture, arguments, result previews, latency, retry approximation, and injected failure markers.
+Level 1 observability is partially implemented as supporting infrastructure through tool-call capture, arguments, result previews, latency, retry approximation, and injected failure markers. This should not be read as production-grade Level 2 maturity yet: the current harness is an initial benchmark and regression-detection foundation, not a statistically stable production reliability gate.
 
 ## 3. Proposed Eval Framework for Core AI Behavior
 
 The eval framework measures the core behavior of `mini_agent`: task execution through reasoning, tool use, multi-step orchestration, and recovery.
 
+The production version of this eval framework should separate three layers of correctness:
+
+| Layer | Question |
+| --- | --- |
+| Output correctness | Did the final answer contain the required answer and avoid forbidden claims? |
+| Trajectory correctness | Did the agent call the right tools, in the right order, with the right arguments, and use observations correctly? |
+| End-state correctness | Did the task produce the correct external state, such as the expected file contents or durable result, rather than only a plausible final answer? |
+
+The current implementation is strongest on output and trajectory checks. End-state verification is still limited and should be expanded for production-like tasks.
+
 ### Dataset
 
 I created a benchmark suite of 32 tasks.
+
+These 32 tasks are early single-trial evidence, not definitive production reliability measurements. Because LLM agent behavior is stochastic, production gates should run repeated attempts per task and track variance or confidence intervals.
 
 | Category | Count | Purpose |
 | --- | ---: | --- |
@@ -218,7 +257,12 @@ Advanced:
 | Metric | Meaning |
 | --- | --- |
 | Task completion rate | Did the agent complete the task successfully? |
-| Tool selection accuracy | Did it call the expected tools? |
+| Tool necessity precision/recall | Did it avoid unnecessary tools while still calling tools when required? |
+| Tool argument correctness | Did it preserve exact arguments such as arithmetic expressions, filenames, and user-provided text? |
+| Tool order correctness | Did it call required tools in the required sequence? |
+| Observation use | Did it ground the final answer in tool results rather than stale context or fabrication? |
+| Tool efficiency | Did it avoid repeated, redundant, or runaway tool calls? |
+| Side-effect/end-state correctness | Did file writes, reads, or other stateful actions produce the expected state? |
 | Multi-step completion | Did it complete required tool chains? |
 | Recovery success | Did it recover from transient failures or fail gracefully? |
 | Advanced success | Did it pass long-horizon, large-context, hallucination, prompt-injection, and argument-precision tasks? |
@@ -235,6 +279,12 @@ Optional next metrics:
 - Retries per task
 - Loop iterations
 - P95/P99 latency
+- Multiple trials per task
+- Pass-rate variance or confidence intervals
+- Prompt perturbation success rate
+- End-state verification pass rate
+- Failure severity
+- Root-cause category for failed trajectories
 
 Known LLM issues covered:
 
@@ -282,7 +332,18 @@ avg_latency:
   max_increase: 20%
 ```
 
-If a new version violates these thresholds, deployment should be blocked or manually reviewed.
+These thresholds are illustrative. With only 32 single-trial tasks, a 5% drop is less than two tasks, so a production gate would be noisy. A real deployment gate should add:
+
+- baseline versioning by model, provider, prompt, tool schema, and reliability settings,
+- repeated trials per task before comparing pass rates,
+- per-category thresholds for direct reasoning, single-tool, multi-step, recovery, and advanced tasks,
+- confidence intervals or variance tracking,
+- separate correctness and latency gates,
+- stricter gates for safety, security, and side-effect tasks,
+- held-out benchmark tasks that are not tuned during development,
+- a flaky-task policy so noisy tests are investigated instead of ignored.
+
+If a new version violates these stronger gates, deployment should be blocked or manually reviewed.
 
 ### Current Eval Files
 
@@ -308,7 +369,7 @@ python eval/run_eval.py --task-id single_tool_math_001
 
 ### Eval Evidence
 
-I tested two local model variants.
+I tested two local model variants. These results are useful early evidence from the current single-trial benchmark, but they should not be interpreted as statistically stable production reliability.
 
 ```text
 Mini Agent Eval Summary
@@ -350,6 +411,8 @@ The 12B model slightly improved total task completion and advanced-task success,
 
 ## 4. Cost and Latency Estimate at 10k Users/Day
 
+The estimates in this section should be read as sensitivity analysis, not production capacity guarantees. They combine local eval latency, public decode-throughput benchmarks, and cloud GPU pricing to show relative risk and cost drivers. Those signals are useful, but they are not interchangeable with a target-hardware serving benchmark.
+
 ### Traffic Assumption
 
 Assume:
@@ -365,6 +428,17 @@ Using the local eval benchmark:
 - Average tool calls:
   - `gemma4-e2b-64k`: 3.531
   - `gemma4-12b-32k`: 1.875
+
+Before using these numbers for an actual deployment, the team should measure:
+
+- prompt tokens,
+- completion tokens,
+- prefill time,
+- decode time,
+- queue time,
+- P95/P99 latency,
+- batching behavior,
+- target-hardware serving performance under realistic concurrency.
 
 External throughput references:
 
@@ -613,14 +687,23 @@ Likely bottlenecks:
 
 Near-term:
 
-- Add max loop iterations.
+- Add `max_turns`.
+- Add `max_tool_calls`.
 - Add per-run timeout.
 - Add per-tool timeout.
+- Add max tool output bytes.
+- Add max context tokens.
+- Add max mixed-mode remote delegations.
+- Add budget-exceeded response behavior.
+- Add structured budget telemetry.
 - Track latency per run.
 - Track tool calls per run.
 - Track provider/model used per run.
 - Persist eval baselines.
 - Use evals before changing models.
+- Expand evals to multiple trials per task.
+- Add held-out benchmark tasks and prompt perturbation tests.
+- Add production-like fault injection for timeouts, partial tool responses, provider rate limits, schema drift, stale observations, and failed tools.
 
 Medium-term:
 
@@ -640,6 +723,23 @@ Long-term:
 ## 5. Memory Plan
 
 Memory should be handled in stages. The immediate priority is not long-term user memory; it is durable execution memory for debugging, eval growth, regression analysis, and future trajectory learning.
+
+The memory architecture should be treated as a write-manage-read system:
+
+```text
+Run or session event
+  |
+  v
+Memory write policy and redaction
+  |
+  v
+Indexed durable record
+  |
+  v
+Replay, retrieval, eval generation, or session recall
+```
+
+This framing matters because memory is not just storage. The system must decide what is allowed to be written, how it is redacted, how long it is retained, how it is retrieved, and how stale or contradictory information is corrected.
 
 ### Execution Memory
 
@@ -690,6 +790,11 @@ Next:
 - Record provider/model metadata for every run.
 - Store tool arguments and result previews with secret redaction.
 - Keep enough data to replay failures as future benchmark cases.
+- Define a write policy for which events, prompts, tool arguments, tool results, and errors are retained.
+- Index traces by task type, model, provider, prompt version, tool schema version, status, failure reason, and latency.
+- Add retention and deletion rules so execution memory is not an unbounded privacy liability.
+- Represent corrected or contradictory facts explicitly instead of letting stale observations remain unmarked.
+- Convert failed production traces into benchmark candidates with labels for root cause, severity, and expected end state.
 
 ### Session Memory
 
@@ -702,6 +807,9 @@ Planned:
 - Isolate sessions by session ID.
 - Avoid leaking memory across users.
 - Add context-budget checks before each provider call.
+- Test summary faithfulness so important tool results, user constraints, safety instructions, and corrections are not summarized away.
+- Track which session facts came from the user, the model, or a tool.
+- Treat retrieved or summarized session memory as untrusted context that can be contradicted by newer user instructions or tool observations.
 
 Why this is later:
 
@@ -728,7 +836,12 @@ Long-term memory belongs after:
 - eval regression gates,
 - session isolation,
 - secret redaction,
-- user consent and deletion workflows.
+- user consent and deletion workflows,
+- user-visible memory inspection,
+- access controls,
+- memory poisoning tests,
+- contradiction handling,
+- memory-specific evals.
 
 ### Trajectory Memory
 
@@ -745,32 +858,50 @@ This should remain future work until Level 1 observability and Level 2 evals are
 
 ## 6. Maturity Roadmap
 
+Each subpoint below uses `subpoint: about` format: a short plain-English definition plus why it matters for production reliability.
+
 ### Level 0: Baseline Agent
 
 Current state:
 
-- Agent loop works.
-- Tools work.
-- Local, remote, and mixed modes exist.
-- Reliability layer exists.
+- Agent loop works: The core while-loop can ask a model, receive tool calls, append observations, and continue to a final answer; this matters because every later reliability improvement depends on this loop behaving predictably.
+- Tools work: The agent can call simple functions such as math, date, file, and text tools; this matters because tool use is what turns the model from a chatbot into an action-taking agent.
+- Local, remote, and mixed modes exist: The same agent can run through Ollama, cloud providers, or a local orchestrator that delegates to a remote model; this matters because production routing can trade off privacy, cost, latency, and capability.
+- Reliability layer exists: Retries, circuit breakers, schema validation, traces, and provider fallback are already present; this matters because these are the first guardrails against transient failures and malformed tool calls.
 
 Limitation:
 
-- No systematic evaluation before this work.
-- Limited production visibility.
-- No deployment gating.
+- No systematic evaluation before this work: The repo originally had no repeatable benchmark to show whether a model, prompt, or tool change made behavior better or worse; this matters because anecdotes are not enough for production decisions.
+- Limited production visibility: The repo can show some tool traces, but it cannot yet reconstruct a full run across model calls, tool calls, retries, policies, budgets, and final state; this matters because teams need traces to debug user-reported failures.
+- No deployment gating: There is no enforced pass/fail rule before changing prompts, tools, models, or providers; this matters because a silent regression can reach users without being caught first.
 
 ### Level 1: Observability
 
 Add:
 
-- structured run logs,
-- request IDs,
-- tool traces,
-- latency metrics,
-- error categories,
-- run history,
-- execution memory.
+- structured run logs: Store each run as machine-readable events instead of loose terminal output; this matters because structured records can be searched, aggregated, replayed, and turned into eval cases.
+- request IDs: Give every user task a stable identifier; this matters because engineers need one handle to follow a failure across model calls, tool calls, retries, and logs.
+- tool traces: Record each tool name, argument, result preview, duration, and error; this matters because many agent failures happen in the path between model intent and tool execution.
+- latency metrics: Measure how long each model call, tool call, and full run takes; this matters because slow agents become expensive, frustrating, and hard to scale.
+- error categories: Label failures by type such as provider error, tool error, schema error, timeout, hallucinated result, or policy denial; this matters because useful remediation depends on knowing the failure class.
+- run history: Persist past runs beyond the current process; this matters because debugging, model comparison, and failure replay require durable evidence.
+- execution memory: Store task traces, tool steps, model/provider metadata, and outcomes as replayable records; this matters because production failures should become future benchmark examples.
+
+The trace schema should include:
+
+- run ID: A unique name for one complete agent attempt; this matters because all logs and eval results need to point back to the same run.
+- session/user/tenant boundary: Metadata that keeps one user or organization separate from another; this matters because observability must not create privacy leaks or cross-user confusion.
+- prompt version: The exact prompt or instruction version used for the run; this matters because prompt edits can silently change agent behavior.
+- model, provider, and version: The exact model route used, such as local Ollama or a cloud provider; this matters because reliability and latency differ by route.
+- every model call: A span for each time the agent asks an LLM what to do next; this matters because multi-turn tool use can fail in any individual model step.
+- every tool call: A span for each external action the agent takes; this matters because tool arguments, outputs, and errors are often the root cause of failure.
+- redacted arguments and result previews: Store enough input/output detail to debug while removing secrets or sensitive data; this matters because traces must be useful without becoming a privacy risk.
+- retry and fallback events: Record when the system retries a failed call or switches providers; this matters because retries can recover a run but also increase latency and cost.
+- budget counters: Track turns, tool calls, tokens, time, and estimated cost during the run; this matters because budgets stop runaway loops.
+- policy checks: Record allow/deny decisions before risky tool use; this matters because schema-valid actions can still be unsafe or unauthorized.
+- guardrail outcomes: Record whether safety, injection, or policy checks passed or failed; this matters because production teams need to distinguish normal failures from controlled refusals.
+- final state: Record the durable result of the task, such as final answer and file state; this matters because a plausible answer is not enough if the side effect is wrong.
+- grader outputs: Store eval pass/fail checks and failure reasons; this matters because traces should connect directly to regression detection.
 
 Outcome:
 
@@ -788,11 +919,18 @@ Partially implemented through eval tracing.
 
 Add:
 
-- benchmark suite,
-- eval runner,
-- metrics,
-- model comparison,
-- regression thresholds.
+- benchmark suite: A fixed set of tasks that represent direct reasoning, tool use, multi-step work, recovery, and advanced failures; this matters because agent quality must be measured against known workloads.
+- eval runner: A command that runs the benchmark against a chosen model/provider route; this matters because evals need to be repeatable instead of manual demos.
+- metrics: Numeric summaries such as task completion, latency, recovery success, tool errors, and advanced success; this matters because improvement requires measurable baselines.
+- model comparison: Run the same tasks on different local or remote models; this matters because larger models are not automatically better for every agent route.
+- regression thresholds: Rules that flag unacceptable drops in quality or increases in latency; this matters because teams need deployment gates before users notice regressions.
+- repeated trials per task: Run the same task multiple times, not once; this matters because LLM behavior is stochastic and a single pass can be misleading.
+- held-out benchmark tasks: Keep some tasks unused during tuning; this matters because the eval should measure generalization, not memorization of the benchmark.
+- prompt perturbation tests: Rephrase tasks while preserving intent; this matters because a reliable agent should not break when the user says the same thing differently.
+- production-like fault injection: Simulate timeouts, rate limits, partial tool responses, schema drift, stale observations, and failed tools; this matters because real production failures rarely look like clean happy paths.
+- confidence-aware gates: Compare results with variance or confidence intervals instead of raw single-run percentages; this matters because noisy evals can otherwise block good changes or allow bad ones.
+- root-cause taxonomy for failed trajectories: Label why an agent failed, such as wrong tool, bad argument, ignored observation, timeout, or hallucination; this matters because different failures need different fixes.
+- end-state verifiers: Check the actual result of the task, such as file contents or final computed value; this matters because the final answer can sound right even when the action was wrong.
 
 Outcome:
 
@@ -803,20 +941,23 @@ We can know when the agent gets worse.
 Status:
 
 ```text
-Implemented.
+Initial Level 2 harness implemented; production-grade regression detection is not complete.
 ```
 
 ### Level 3: Continuous Optimization
 
 Add:
 
-- eval history,
-- prompt/model experiment tracking,
-- model routing,
-- SGLang/vLLM for optimized serving,
-- caching,
-- latency/cost optimization,
-- production failures converted into eval cases.
+- eval history: Keep a timeline of benchmark results across commits, prompts, tools, models, and providers; this matters because long-term reliability trends are more useful than one-off scores.
+- prompt/model experiment tracking: Record which prompt or model variant produced each result; this matters because teams need to know what changed when quality moves.
+- model routing: Send simple tasks to cheaper/faster models and harder tasks to stronger routes only when evals justify it; this matters because production agents need balanced quality, cost, and latency.
+- SGLang/vLLM for optimized serving: Use dedicated serving systems for local models instead of ad-hoc local inference; this matters because production traffic needs batching, concurrency, and stable throughput.
+- caching: Reuse safe prompt prefixes or repeated results when appropriate; this matters because caching can reduce cost and latency without changing the answer.
+- latency/cost optimization: Continuously tune model choice, batching, caching, and tool flow; this matters because agent loops can multiply small inefficiencies across many users.
+- production failures converted into eval cases: Turn real incidents into benchmark tasks with expected behavior; this matters because the eval suite should learn from actual failures.
+- hard execution budgets: Set strict limits on turns, tool calls, runtime, output size, context tokens, remote delegations, and estimated cost; this matters because one bad loop should not become an outage or surprise bill.
+- trace-native observability: Design logs as connected spans for model calls, tool calls, policies, budgets, and outcomes; this matters because agent failures are easier to debug when the whole trajectory is visible.
+- tool policy enforcement: Put authorization, side-effect checks, semantic validation, timeouts, output caps, and redaction before tool dispatch; this matters because a valid JSON tool call can still be unsafe.
 
 Outcome:
 
@@ -836,11 +977,11 @@ Future only.
 
 Possible additions:
 
-- trajectory datasets,
-- reward functions,
-- Agent Lightning-like RL,
-- policy optimization,
-- automatic improvement loops.
+- trajectory datasets: Curated records of successful and failed agent steps; this matters because learning systems need examples of what good and bad behavior look like.
+- reward functions: Scoring rules that value correct answers, efficient tool use, safe behavior, and graceful recovery; this matters because learning from experience needs a clear definition of success.
+- Agent Lightning-like RL: A future reinforcement-learning approach that trains from agent trajectories; this matters only after traces, evals, and rewards are mature enough to avoid optimizing the wrong behavior.
+- policy optimization: Improve the agent's decision policy using labeled trajectories and rewards; this matters because the goal is not just better answers, but better decisions about when and how to act.
+- automatic improvement loops: Systems that propose, test, and select agent improvements based on eval results; this matters because automation can accelerate iteration, but only after guardrails prevent unsafe self-improvement.
 
 Status:
 
