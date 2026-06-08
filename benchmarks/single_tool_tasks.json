@@ -1,0 +1,51 @@
+[
+  {
+    "id": "single_tool_math_001",
+    "category": "single_tool",
+    "task": "What is 144 * 37?",
+    "expected_tools": ["calculate"],
+    "expected_answer_contains": ["5328"],
+    "max_tool_calls": 2,
+    "max_latency_seconds": 20,
+    "notes": "Catches missed calculation tool and arithmetic mistakes."
+  },
+  {
+    "id": "single_tool_percent_001",
+    "category": "single_tool",
+    "task": "What is 15% of 847?",
+    "expected_tools": ["calculate"],
+    "expected_answer_contains": ["127.05"],
+    "max_tool_calls": 2,
+    "max_latency_seconds": 20,
+    "notes": "Catches bad math and wrong tool choice."
+  },
+  {
+    "id": "single_tool_date_001",
+    "category": "single_tool",
+    "task": "What is today's date?",
+    "expected_tools": ["get_current_date"],
+    "max_tool_calls": 2,
+    "max_latency_seconds": 20,
+    "notes": "Catches stale date hallucination and missed date tool use."
+  },
+  {
+    "id": "single_tool_weather_001",
+    "category": "single_tool",
+    "task": "What is the weather in Tokyo?",
+    "expected_tools": ["get_weather"],
+    "expected_answer_contains": ["Tokyo"],
+    "max_tool_calls": 2,
+    "max_latency_seconds": 20,
+    "notes": "Catches missed weather tool and fabricated weather."
+  },
+  {
+    "id": "single_tool_uppercase_001",
+    "category": "single_tool",
+    "task": "Convert this text to uppercase: mini agent",
+    "expected_tools": ["to_uppercase"],
+    "expected_answer_contains": ["MINI AGENT"],
+    "max_tool_calls": 2,
+    "max_latency_seconds": 30,
+    "notes": "Catches MCP tool selection and result propagation."
+  }
+]

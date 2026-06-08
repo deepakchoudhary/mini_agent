@@ -1,0 +1,57 @@
+[
+  {
+    "id": "multi_step_briefing_001",
+    "category": "multi_step",
+    "task": "Get today's date and the weather in Tokyo. Calculate how many days are left until New Year's Day 2027. Write a short daily briefing to briefing.txt, read it back, and count the words.",
+    "expected_tools": ["get_current_date", "get_weather", "calculate", "write_file", "read_file", "count_words"],
+    "required_tool_order": ["get_current_date", "get_weather", "calculate", "write_file", "read_file", "count_words"],
+    "expected_answer_contains": ["briefing"],
+    "max_tool_calls": 8,
+    "max_latency_seconds": 60,
+    "notes": "README-style chain covering sequencing and observation use."
+  },
+  {
+    "id": "multi_step_write_read_001",
+    "category": "multi_step",
+    "task": "Write the sentence 'Evaluation makes agent changes safer.' to eval_note.txt, read it back, and tell me how many words it contains.",
+    "expected_tools": ["write_file", "read_file", "count_words"],
+    "required_tool_order": ["write_file", "read_file", "count_words"],
+    "expected_answer_contains": ["5"],
+    "max_tool_calls": 5,
+    "max_latency_seconds": 45,
+    "notes": "Catches whether the model uses the written content instead of guessing."
+  },
+  {
+    "id": "multi_step_weather_math_001",
+    "category": "multi_step",
+    "task": "Get the weather in London and calculate 12 * 14. Give me both results in one short answer.",
+    "expected_tools": ["get_weather", "calculate"],
+    "required_tool_order": ["get_weather", "calculate"],
+    "expected_answer_contains": ["168"],
+    "max_tool_calls": 4,
+    "max_latency_seconds": 35,
+    "notes": "Catches partial completion where one required result is omitted."
+  },
+  {
+    "id": "multi_step_transform_count_001",
+    "category": "multi_step",
+    "task": "Convert 'reliable tiny agent' to uppercase, then count how many words are in the uppercase result.",
+    "expected_tools": ["to_uppercase", "count_words"],
+    "required_tool_order": ["to_uppercase", "count_words"],
+    "expected_answer_contains": ["3"],
+    "max_tool_calls": 4,
+    "max_latency_seconds": 45,
+    "notes": "Catches tool chaining through an intermediate observation."
+  },
+  {
+    "id": "multi_step_date_math_001",
+    "category": "multi_step",
+    "task": "Get today's date, then calculate 365 - 42, and include both the date and the calculation result in your final answer.",
+    "expected_tools": ["get_current_date", "calculate"],
+    "required_tool_order": ["get_current_date", "calculate"],
+    "expected_answer_contains": ["323"],
+    "max_tool_calls": 4,
+    "max_latency_seconds": 35,
+    "notes": "Catches final answers that drop one of two observations."
+  }
+]
