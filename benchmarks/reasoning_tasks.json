@@ -1,0 +1,52 @@
+[
+  {
+    "id": "reasoning_quantum_001",
+    "category": "direct_reasoning",
+    "task": "Explain quantum entanglement in two short paragraphs.",
+    "forbidden_tools": ["get_current_date", "calculate", "get_weather", "web_search", "read_file", "write_file", "to_uppercase", "count_words"],
+    "expected_answer_contains": ["quantum", "entanglement"],
+    "max_tool_calls": 0,
+    "max_latency_seconds": 30,
+    "notes": "Catches unnecessary tool use on a pure explanation task."
+  },
+  {
+    "id": "reasoning_summary_001",
+    "category": "direct_reasoning",
+    "task": "Summarize this sentence in five words or fewer: The agent should choose tools only when they are needed.",
+    "forbidden_tools": ["get_current_date", "calculate", "get_weather", "web_search", "read_file", "write_file", "to_uppercase", "count_words"],
+    "expected_answer_contains": ["tools"],
+    "max_tool_calls": 0,
+    "max_latency_seconds": 20,
+    "notes": "Catches unnecessary tools and verbosity drift."
+  },
+  {
+    "id": "reasoning_policy_001",
+    "category": "direct_reasoning",
+    "task": "In one paragraph, explain why an agent should not fabricate tool results.",
+    "forbidden_tools": ["get_current_date", "calculate", "get_weather", "web_search", "read_file", "write_file", "to_uppercase", "count_words"],
+    "expected_answer_contains": ["tool"],
+    "max_tool_calls": 0,
+    "max_latency_seconds": 20,
+    "notes": "Catches hallucination-prone behavior without requiring tools."
+  },
+  {
+    "id": "reasoning_compare_001",
+    "category": "direct_reasoning",
+    "task": "Briefly compare local and remote model execution for an AI agent.",
+    "forbidden_tools": ["get_current_date", "calculate", "get_weather", "web_search", "read_file", "write_file", "to_uppercase", "count_words"],
+    "expected_answer_contains": ["local", "remote"],
+    "max_tool_calls": 0,
+    "max_latency_seconds": 25,
+    "notes": "Catches needless web search for a conceptual comparison."
+  },
+  {
+    "id": "reasoning_steps_001",
+    "category": "direct_reasoning",
+    "task": "List the five stages of this agent loop: task, tool selection, tool execution, observation, final answer.",
+    "forbidden_tools": ["get_current_date", "calculate", "get_weather", "web_search", "read_file", "write_file", "to_uppercase", "count_words"],
+    "expected_answer_contains": ["task", "tool", "observation", "final"],
+    "max_tool_calls": 0,
+    "max_latency_seconds": 20,
+    "notes": "Catches unnecessary tool use on a known in-prompt answer."
+  }
+]
