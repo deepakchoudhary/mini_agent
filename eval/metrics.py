@@ -31,6 +31,7 @@ def summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
         "tool_selection_accuracy": _category_rate(by_category, ["single_tool"]),
         "multi_step_completion_rate": _category_rate(by_category, ["multi_step"]),
         "recovery_success_rate": _category_rate(by_category, ["failure_recovery"]),
+        "advanced_success_rate": _category_rate(by_category, ["advanced"]),
         "tool_error_rate": _pct(tool_errors, total_tool_calls),
         "avg_latency_seconds": round(sum(latencies) / len(latencies), 3) if latencies else None,
         "latency_slo_pass_rate": _pct(

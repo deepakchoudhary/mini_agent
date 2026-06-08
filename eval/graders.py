@@ -28,7 +28,12 @@ def grade_task(task: dict[str, Any], result: dict[str, Any]) -> Grade:
     _check_required_order(task, tool_names, checks, reasons)
     _check_answer_contains(task, answer, checks, reasons)
     _check_answer_contains_any(task, answer, checks, reasons)
+    _check_forbidden_answer_contains(task, answer, checks, reasons)
     _check_answer_regex(task, result.get("final_answer") or "", checks, reasons)
+    _check_min_tool_calls(task, tool_names, checks, reasons)
+    _check_tool_call_counts(task, tool_names, checks, reasons)
+    _check_calculate_sequence(task, result, checks, reasons)
+    _check_tool_argument_contains(task, result, checks, reasons)
     _check_tool_call_limit(task, tool_names, checks, reasons)
     _check_latency_slo(task, result, slo_checks, slo_reasons)
     _check_recovery(task, result, checks, reasons)
@@ -107,6 +112,20 @@ def _check_answer_contains_any(task: dict[str, Any], answer: str, checks: dict[s
         reasons.append(f"answer missing any of: {expected}")
 
 
+def _check_forbidden_answer_contains(task: dict[str, Any], answer: str, checks: dict[str, bool], reasons: list[str]) -> None:
+    forbidden = task.get("forbidden_answer_contains")
+    if forbidden is None:
+        return
+    normalized_answer = _normalize_for_contains(answer)
+    found = [
+        text for text in forbidden
+        if _normalize_for_contains(text) in normalized_answer
+    ]
+    checks["forbidden_answer_contains"] = not found
+    if found:
+        reasons.append(f"answer included forbidden text: {found}")
+
+
 def _check_answer_regex(task: dict[str, Any], answer: str, checks: dict[str, bool], reasons: list[str]) -> None:
     pattern = task.get("expected_answer_regex")
     if pattern is None:
@@ -115,6 +134,79 @@ def _check_answer_regex(task: dict[str, Any], answer: str, checks: dict[str, boo
     checks["expected_answer_regex"] = passed
     if not passed:
         reasons.append(f"answer did not match regex: {pattern}")
+
+
+def _check_tool_call_counts(task: dict[str, Any], tool_names: list[str], checks: dict[str, bool], reasons: list[str]) -> None:
+    expected_counts = task.get("expected_tool_counts")
+    if expected_counts is None:
+        return
+    actual = {name: tool_names.count(name) for name in set(tool_names)}
+    mismatches = {
+        name: {"expected": count, "actual": actual.get(name, 0)}
+        for name, count in expected_counts.items()
+        if actual.get(name, 0) != count
+    }
+    checks["expected_tool_counts"] = not mismatches
+    if mismatches:
+        reasons.append(f"tool call count mismatch: {mismatches}")
+
+
+def _check_min_tool_calls(task: dict[str, Any], tool_names: list[str], checks: dict[str, bool], reasons: list[str]) -> None:
+    minimum = task.get("expected_min_tool_calls")
+    if minimum is None:
+        return
+    passed = len(tool_names) >= int(minimum)
+    checks["expected_min_tool_calls"] = passed
+    if not passed:
+        reasons.append(f"tool calls below expected minimum: {len(tool_names)} < {minimum}")
+
+
+def _check_calculate_sequence(task: dict[str, Any], result: dict[str, Any], checks: dict[str, bool], reasons: list[str]) -> None:
+    expected = task.get("expected_calculate_sequence")
+    if expected is None:
+        return
+    calls = [
+        str((call.get("arguments") or {}).get("expression", ""))
+        for call in result.get("tool_calls", [])
+        if call.get("name") == "calculate"
+    ]
+    actual = [_normalize_expression(expression) for expression in calls]
+    wanted = [_normalize_expression(expression) for expression in expected]
+    position = 0
+    for expression in actual:
+        if position < len(wanted) and wanted[position] in expression:
+            position += 1
+    passed = position == len(wanted)
+    checks["expected_calculate_sequence"] = passed
+    if not passed:
+        reasons.append(
+            f"calculate sequence incomplete: matched {position}/{len(wanted)} expected expressions"
+        )
+
+
+def _check_tool_argument_contains(task: dict[str, Any], result: dict[str, Any], checks: dict[str, bool], reasons: list[str]) -> None:
+    expected = task.get("expected_tool_argument_contains")
+    if expected is None:
+        return
+    tool_calls = result.get("tool_calls", [])
+    missing: list[dict[str, str]] = []
+    for item in expected:
+        tool = item["tool"]
+        field = item["field"]
+        text = _normalize_for_contains(str(item["contains"]))
+        matched = False
+        for call in tool_calls:
+            if call.get("name") != tool:
+                continue
+            value = _normalize_for_contains(str((call.get("arguments") or {}).get(field, "")))
+            if text in value:
+                matched = True
+                break
+        if not matched:
+            missing.append(item)
+    checks["expected_tool_argument_contains"] = not missing
+    if missing:
+        reasons.append(f"missing expected tool argument content: {missing}")
 
 
 def _check_tool_call_limit(task: dict[str, Any], tool_names: list[str], checks: dict[str, bool], reasons: list[str]) -> None:
@@ -159,3 +251,7 @@ def _check_recovery(task: dict[str, Any], result: dict[str, Any], checks: dict[s
 def _normalize_for_contains(text: str) -> str:
     text = text.lower()
     return re.sub(r"(?<=\d),(?=\d)", "", text)
+
+
+def _normalize_expression(text: str) -> str:
+    return re.sub(r"\s+", "", text.lower())

@@ -98,6 +98,7 @@ def load_tasks() -> list[dict[str, Any]]:
         BENCHMARKS_DIR / "single_tool_tasks.json",
         BENCHMARKS_DIR / "multi_step_tasks.json",
         BENCHMARKS_DIR / "recovery_tasks.json",
+        BENCHMARKS_DIR / "advanced_tasks.json",
     ]
     tasks: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -136,6 +137,10 @@ def filter_tasks(
             "tool": "single_tool",
             "multi": "multi_step",
             "recovery": "failure_recovery",
+            "advanced": "advanced",
+            "long": "advanced",
+            "context": "advanced",
+            "hallucination": "advanced",
         }
         category = aliases.get(category, category)
         tasks = [task for task in tasks if task["category"] == category]
@@ -234,6 +239,7 @@ def print_report(payload: dict[str, Any]) -> None:
     print(f"Tool selection: {summary['tool_selection_accuracy']}%")
     print(f"Multi-step completion: {summary['multi_step_completion_rate']}%")
     print(f"Recovery success: {summary['recovery_success_rate']}%")
+    print(f"Advanced success: {summary['advanced_success_rate']}%")
     print(f"Avg latency: {summary['avg_latency_seconds']}s")
     print(f"Latency SLO pass rate: {summary['latency_slo_pass_rate']}%")
     print(f"Avg tool calls: {summary['avg_tool_calls']}")
