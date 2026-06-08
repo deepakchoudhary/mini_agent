@@ -333,30 +333,119 @@ Assume:
 - 5 agent tasks per user/day
 - 50,000 agent runs/day
 
-Using the benchmark:
+Using the local eval benchmark:
 
 - `gemma4-e2b-64k` average latency: about 9.52 seconds
 - `gemma4-12b-32k` average latency: about 31.814 seconds
 - Average tool calls: about 1.2 to 1.3 per task
 
+External throughput references:
+
+- KodeLab measured Gemma 4 on a Mac mini M4 with 32GB RAM and reported `gemma4:e2b` at **54.97 decode tok/s** with **7.06GB RAM**, versus `gemma4:12b` at **12.50 decode tok/s** with **8.05GB RAM**. That makes E2B about **4.4x faster** on Apple Silicon decode throughput.
+- On an RTX 5070 Ti, the same benchmark reported `gemma4:e2b` at **226.30 decode tok/s** and `gemma4:12b` at **78.61 decode tok/s**, making E2B about **2.9x faster** on that GPU.
+- Ollama's Gemma 4 model page lists E2B as **2.3B effective parameters** and 5.1B total parameters with embeddings, which explains why it is much cheaper to run than larger variants for simple orchestration tasks.
+- These external numbers line up with the repo eval: E2B was both faster and more reliable in this task suite.
+
+Sources:
+
+- [KodeLab Gemma 4 benchmark](https://klab.tw/2026/06/gemma4-benchmark/)
+- [Ollama Gemma 4 model page](https://ollama.com/library/gemma4%3A12b-it-q4_K_M)
+
 ### Operational Implications
 
 At 50,000 runs/day:
 
-| Model | Avg Latency | Sequential Compute/Day | Active Inference Hours/Day |
+| Model | Eval Avg Latency | Sequential Compute/Day | Active Inference Hours/Day | Node Equiv. at 100% Utilization | Node Equiv. at 60% Utilization |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `gemma4-e2b-64k` | 9.52s | 476,000s/day | about 132 hours | about 5.5 nodes | about 9.2 nodes |
+| `gemma4-12b-32k` | 31.814s | 1,590,700s/day | about 442 hours | about 18.4 nodes | about 30.7 nodes |
+
+Interpretation:
+
+- On this eval suite, `gemma4-12b-32k` requires about **3.3x more active local inference capacity** than `gemma4-e2b-64k`.
+- Public Mac M4 decode benchmarks suggest the gap can be closer to **4.4x** on pure token generation.
+- If a production service needs 50,000 runs/day, one local laptop-class machine is not enough for either model unless demand is low-concurrency and heavily queued.
+- The E2B model is the better default route for this repo's current workload because it scored higher in the evals and was much faster.
+- The 12B model should not be the default unless a task-specific eval shows a quality gain large enough to justify the extra latency/capacity cost.
+
+### Estimated GPU Serving Cost
+
+To estimate cloud GPU cost, assume the active inference hours above are served on normal single-GPU instances with at least 16GB VRAM. Public hourly reference prices:
+
+- Google Cloud lists NVIDIA T4 16GB at about **USD 0.35/hr**.
+- RunPod lists RTX 4090 24GB Community Cloud from **USD 0.34/hr** and Secure Cloud at **USD 0.69/hr**; I use **USD 0.69/hr** below as the more conservative production-like estimate.
+- Lambda/A10 pricing references commonly place A10 24GB around **USD 0.86/hr**.
+
+Pricing references:
+
+- [Google Cloud GPU pricing](https://cloud.google.com/compute/gpus-pricing)
+- [RunPod RTX 4090 pricing](https://www.runpod.io/gpu-models/rtx-4090)
+- [Lambda Labs GPU pricing reference](https://deploybase.ai/articles/lambda-labs-gpu-pricing-2)
+
+These are estimates, not exact bills. Real cost depends on provider, region, reserved/spot pricing, CPU/RAM/storage, idle time, queueing, batching, and whether the GPU actually matches the throughput observed in the local eval. The table below assumes the eval latency is representative and prices only GPU-hours.
+
+Ideal pay-for-active-time estimate:
+
+| Model Route | Active Inference Hours/Day | T4 16GB at $0.35/hr | RTX 4090 24GB at $0.69/hr | A10 24GB at $0.86/hr |
+| --- | ---: | ---: | ---: | ---: |
+| `gemma4-e2b-64k` | about 132h | about USD 46/day | about USD 91/day | about USD 114/day |
+| `gemma4-12b-32k` | about 442h | about USD 155/day | about USD 305/day | about USD 380/day |
+
+More realistic always-on serving estimate at 60% utilization:
+
+| Model Route | T4 16GB | RTX 4090 24GB | A10 24GB |
 | --- | ---: | ---: | ---: |
-| `gemma4-e2b-64k` | 9.52s | 476,000s/day | about 132 hours |
-| `gemma4-12b-32k` | 31.814s | 1,590,700s/day | about 442 hours |
+| `gemma4-e2b-64k` | about USD 77/day, USD 2.3k/month | about USD 152/day, USD 4.6k/month | about USD 190/day, USD 5.7k/month |
+| `gemma4-12b-32k` | about USD 258/day, USD 7.7k/month | about USD 508/day, USD 15.2k/month | about USD 633/day, USD 19.0k/month |
 
-This means model choice has a large impact on serving cost and user experience.
+Cost conclusion:
 
-### Illustrative Cost Risk
+```text
+At the same traffic level, the 12B route costs roughly 3.3x more GPU serving capacity
+than the E2B route based on observed eval latency, while producing worse benchmark
+results in this test.
+```
 
-| Scenario | Cost/Run | Runs/Day | Daily Cost |
-| --- | ---: | ---: | ---: |
-| Controlled simple run | USD 0.03 | 50,000 | USD 1,500/day |
-| Runaway multi-tool run | USD 0.30 | 50,000 | USD 15,000/day |
-| Severe context/tool explosion | USD 3.00 | 50,000 | USD 150,000/day |
+For this workload, I would default to E2B for direct reasoning, single-tool, and simple multi-step tasks. I would route to 12B or a remote model only when category-specific evals prove a quality improvement that justifies the extra cost.
+
+### Cost Risk
+
+For local Ollama execution, the dominant cost is not per-token API billing; it is serving capacity, GPU rental, hardware amortization, power, queueing, and operational overhead. For remote model execution, the same runaway behavior becomes direct per-token API spend.
+
+The biggest cost risk is unbounded agent behavior:
+
+- too many loop iterations,
+- repeated tool failures,
+- repeated remote delegation,
+- large context windows,
+- missing per-run timeout,
+- missing token/cost budget.
+
+Using the conservative RTX 4090 24GB Secure Cloud estimate at 60% utilization:
+
+| Scenario | What Changes | `gemma4-e2b-64k` Local GPU Cost | `gemma4-12b-32k` Local GPU Cost |
+| --- | --- | ---: | ---: |
+| Controlled baseline | Current eval average latency and tool calls | about USD 152/day, USD 4.6k/month | about USD 508/day, USD 15.2k/month |
+| 2x loop/tool blowup | Twice the average runtime from retries, extra tool calls, or longer responses | about USD 304/day, USD 9.1k/month | about USD 1.0k/day, USD 30.5k/month |
+| 10x severe blowup | Pathological context growth, repeated failures, or uncontrolled delegation | about USD 1.5k/day, USD 45.6k/month | about USD 5.1k/day, USD 152k/month |
+
+Using the more expensive A10 24GB estimate at 60% utilization:
+
+| Scenario | `gemma4-e2b-64k` Local GPU Cost | `gemma4-12b-32k` Local GPU Cost |
+| --- | ---: | ---: |
+| Controlled baseline | about USD 190/day, USD 5.7k/month | about USD 633/day, USD 19.0k/month |
+| 2x loop/tool blowup | about USD 379/day, USD 11.4k/month | about USD 1.3k/day, USD 38.0k/month |
+| 10x severe blowup | about USD 1.9k/day, USD 56.9k/month | about USD 6.3k/day, USD 190k/month |
+
+For remote providers, the same runaway behavior becomes direct token spend. A 10x loop or context blowup can turn a small request into a proportionally larger bill, so the same `max_turns`, `max_tool_calls`, timeout, and token-budget controls are required.
+
+Cost implication:
+
+```text
+E2B is the default economical route for this benchmark.
+12B costs about 3.3x more measured serving capacity in the eval.
+Unbounded loops multiply either local GPU serving cost or remote API spend.
+```
 
 ### Bottlenecks at 10k Users/Day
 
@@ -390,7 +479,8 @@ Medium-term:
 - Add batching and concurrency limits.
 - Keep MCP tools warm instead of spawning fresh subprocesses per call.
 - Add prompt/result caching where safe.
-- Add model routing: smaller local model for simple tool tasks, remote model for complex reasoning.
+- Add model routing: E2B for direct, single-tool, and simple multi-step tasks; stronger local or remote models only when evals prove a quality gain.
+- Track per-category latency and quality so routing is benchmark-driven instead of parameter-count-driven.
 
 Long-term:
 
