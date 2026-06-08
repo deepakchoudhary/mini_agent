@@ -447,10 +447,35 @@ External throughput references:
 - Ollama's Gemma 4 model page lists E2B as **2.3B effective parameters** and 5.1B total parameters with embeddings, which explains why it is much cheaper to run than larger variants for simple orchestration tasks.
 - These external numbers line up with the repo eval on latency: E2B is substantially faster. Quality is category-dependent: 12B did slightly better on the new advanced tasks, while E2B did better on multi-step completion, recovery, and latency SLOs.
 
+Additional public benchmark cross-check:
+
+| Source | Hardware / Backend | Model | Reported Timing | Confidence | Cost Implication |
+| --- | --- | --- | ---: | --- | --- |
+| KodeLab | Mac mini M4 32GB, Ollama 0.30.5, Q4_K_M, `num_ctx=4096` | `gemma4:e2b` | 54.97 decode tok/s | High for this hardware because it reports method, version, context, and three-run average. | Local hardware cost only; useful mainly for relative speed. |
+| KodeLab | Mac mini M4 32GB, Ollama 0.30.5, Q4_K_M, `num_ctx=4096` | `gemma4:12b` | 12.50 decode tok/s | High for this hardware because it is the same test setup as E2B. | About 4.4x slower than E2B on this machine. |
+| KodeLab | RTX 5070 Ti 16GB | `gemma4:e2b` | 226.30 decode tok/s, 3.6GB peak VRAM | High for relative comparison within the same article. | At a $0.69/hr RTX 4090-style price, this speed implies about **USD 0.85 per 1M generated tokens** before agent overhead. |
+| KodeLab | RTX 5070 Ti 16GB | `gemma4:12b` | 78.61 decode tok/s, 8.9GB peak VRAM | High for relative comparison within the same article. | At a $0.69/hr RTX 4090-style price, this speed implies about **USD 2.44 per 1M generated tokens** before agent overhead. |
+| DLYog Research | RTX 3090 24GB, multimodal benchmark | Gemma 4 E2B | 41.1 tok/s average, 10.3GB VRAM, 204.8W average power | Medium; independent benchmark, but workload and precision differ from KodeLab. | At a $0.46/hr RTX 3090-style price, this speed implies about **USD 3.11 per 1M generated tokens** before agent overhead. |
+| LMSpeed | Community/API speed probes across providers | Gemma 4 E2B IT | 216.98 tok/s average, 1.16s first token, 30 tests | Medium-low; useful as a market signal, but the site labels results advisory and provider details are less controlled. | Confirms E2B can be very fast on hosted backends, but it should not replace local target-hardware testing. |
+| LocalLLaMA community report | RTX 4090 24GB | Gemma 4 12B | 80 tok/s, 9GB VRAM | Low-medium; useful anecdotal RTX 4090 signal, but single community run and workload-specific. | At $0.69/hr, this implies about **USD 2.40 per 1M generated tokens** before agent overhead. |
+| LocalLLaMA community report | RTX 4070 Super 12GB with patched llama.cpp MTP + draft model | Gemma 4 12B QAT/MTP | 120 tok/s | Low-medium; demonstrates MTP upside, but the patched stack is not the baseline Ollama route. | At $0.69/hr, a 120 tok/s serving stack would imply about **USD 1.60 per 1M generated tokens**, but only if the production stack supports the same MTP path. |
+
+These timing numbers vary because they measure different backends, quantizations, contexts, hardware, prompts, and concurrency. The cost numbers above are deliberately decode-only sanity checks:
+
+```text
+cost per 1M generated tokens = hourly GPU price / (decode tokens per second * 3600 / 1,000,000)
+```
+
+They exclude prompt prefill, queueing, tool latency, retries, idle capacity, storage, CPU/RAM, networking, and observability overhead. For agent workloads, completed-run cost is usually higher than raw decode cost because each user task may require several smaller model calls separated by tool execution.
+
 Sources:
 
 - [KodeLab Gemma 4 benchmark](https://klab.tw/2026/06/gemma4-benchmark/)
 - [Ollama Gemma 4 model page](https://ollama.com/library/gemma4%3A12b-it-q4_K_M)
+- [DLYog Gemma 4 E2B multimodal benchmark](https://www.dlyog.com/blog/gemma-4-e2b-vs-phi-4-multimodal)
+- [LMSpeed Gemma 4 E2B speed probes](https://lmspeed.net/model/gemma-4-e2b-it)
+- [LocalLLaMA Gemma 4 12B RTX 4090 report](https://www.reddit.com/r/LocalLLaMA/comments/1tw4tmf/new_google_gemma_4_12b_claims_near26b_performance/)
+- [LocalLLaMA Gemma 4 12B MTP report](https://www.reddit.com/r/LocalLLaMA/comments/1typjmc/120_toks_on_12gb_vram_with_gemma_4_12b_qat_mtp/)
 
 ### Operational Implications
 
@@ -520,6 +545,7 @@ Pricing references:
 
 - [Google Cloud GPU pricing](https://cloud.google.com/compute/gpus-pricing)
 - [RunPod RTX 4090 pricing](https://www.runpod.io/gpu-models/rtx-4090)
+- [GPU Finder RunPod GPU pricing](https://gpufinder.dev/providers/runpod)
 - [Lambda Labs GPU pricing reference](https://deploybase.ai/articles/lambda-labs-gpu-pricing-2)
 - [OpenAI API pricing](https://openai.com/api/pricing/)
 - [OpenAI prompt caching](https://platform.openai.com/docs/guides/prompt-caching)
